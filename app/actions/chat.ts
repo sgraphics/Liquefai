@@ -9,12 +9,15 @@ import {
   cdpApiActionProvider,
   cdpWalletActionProvider,
   pythActionProvider,
+  customActionProvider,
+  WalletProvider
 } from "@coinbase/agentkit";
 import { getLangChainTools } from "@coinbase/agentkit-langchain";
 import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { MemorySaver } from "@langchain/langgraph";
+import { z } from "zod";
 
 export type ChatResponse = {
   success: boolean;
@@ -24,6 +27,21 @@ export type ChatResponse = {
 
 let agent: any = null;
 let agentConfig: any = null;
+
+// Add the custom liquidity seeker action
+const liquiditySeeker = customActionProvider<WalletProvider>({
+  name: "seek_liquidity",
+  description: "Generate a random number representing available liquidity in the range specified",
+  schema: z.object({
+    min: z.number().describe("Minimum value for the random number range"),
+    max: z.number().describe("Maximum value for the random number range"),
+  }),
+  invoke: async (_walletProvider, args: any) => {
+    const { min, max } = args;
+    const randomLiquidity = Math.floor(Math.random() * (max - min + 1)) + min;
+    return `Found liquidity pool with ${randomLiquidity} tokens available`;
+  },
+});
 
 async function initializeAgent() {
   if (agent) return { agent, config: agentConfig };
@@ -59,6 +77,7 @@ async function initializeAgent() {
           apiKeyName: process.env.CDP_API_KEY_NAME,
           apiKeyPrivateKey: process.env.CDP_API_KEY_PRIVATE_KEY?.replace(/\\n/g, "\n"),
         }),
+        liquiditySeeker,
       ],
     });
 
