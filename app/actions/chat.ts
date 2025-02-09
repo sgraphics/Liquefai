@@ -18,6 +18,8 @@ import { ChatOpenAI } from "@langchain/openai";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { MemorySaver } from "@langchain/langgraph";
 import { z } from "zod";
+import { UniswapPathFinder } from '../lib/uniswapPathFinder';
+import { Token } from '@uniswap/sdk-core';
 
 export type ChatResponse = {
   success: boolean;
@@ -43,6 +45,43 @@ const liquiditySeeker = customActionProvider<WalletProvider>({
   },
 });
 
+// Add the path finder action
+const pathFinderAction = customActionProvider<CdpWalletProvider>({
+  name: "find_best_swap_path",
+  description: "Find the best swap path for a given input token to multiple possible output tokens",
+  schema: z.object({
+    amount: z.string().describe("Amount of input tokens (in wei)"),
+    inputToken: z.string().describe("Input token address"),
+    baseTokens: z.array(z.string()).describe("List of base token addresses to try routing through"),
+    outputTokens: z.array(z.string()).describe("List of desired output token addresses"),
+  }),
+  invoke: async (walletProvider, args: any) => {
+    const { amount, inputToken, baseTokens, outputTokens } = args;
+    
+    const createToken = (address: string) => new Token(
+      parseInt(walletProvider.getNetwork().chainId),
+      address,
+      18
+    );
+
+    const pathFinder = new UniswapPathFinder(
+      "UNISWAP_QUOTER_ADDRESS", // Replace with actual address for the network
+      walletProvider
+    );
+
+    const paths = await pathFinder.findBestPaths({
+      amount: BigInt(amount),
+      inputToken: createToken(inputToken),
+      baseTokens: baseTokens.map(createToken),
+      outputTokens: outputTokens.map(createToken),
+      quoterAddress: "UNISWAP_QUOTER_ADDRESS", // Replace with actual address
+      walletProvider
+    });
+
+    return paths.slice(0, 5).map(UniswapPathFinder.formatPath).join('\n');
+  },
+});
+
 async function initializeAgent() {
   if (agent) return { agent, config: agentConfig };
 
@@ -65,6 +104,7 @@ async function initializeAgent() {
     const agentkit = await AgentKit.from({
       walletProvider,
       actionProviders: [
+        /*
         wethActionProvider(),
         pythActionProvider(),
         walletActionProvider(),
@@ -77,7 +117,9 @@ async function initializeAgent() {
           apiKeyName: process.env.CDP_API_KEY_NAME,
           apiKeyPrivateKey: process.env.CDP_API_KEY_PRIVATE_KEY?.replace(/\\n/g, "\n"),
         }),
+        */
         liquiditySeeker,
+        pathFinderAction,
       ],
     });
 
