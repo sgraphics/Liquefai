@@ -62,6 +62,44 @@ export default function TradingCard() {
     }
   };
 
+  const tools = [
+    {
+      type: "function",
+      function: {
+        name: "find_split_routes",
+        description: "Find routes for splitting ETH into different tokens",
+        parameters: {
+          type: "object",
+          properties: {
+            inputAmount: {
+              type: "string",
+              description: "Amount of ETH to split"
+            },
+            splits: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  token: {
+                    type: "object",
+                    properties: {
+                      address: { type: "string" },
+                      decimals: { type: "number" },
+                      symbol: { type: "string" },
+                      name: { type: "string" }
+                    }
+                  },
+                  percentage: { type: "number" }
+                }
+              }
+            }
+          },
+          required: ["inputAmount", "splits"]
+        }
+      }
+    }
+  ];
+
   return (
     <div className={`card-container w-full max-w-[500px] mx-auto ${
       isExpanded ? 'expanded' : ''
@@ -88,7 +126,7 @@ export default function TradingCard() {
           <p className="text-gray-500">Whats the cheapest pool for trading ETH</p>
         </div>
 
-        {/* Chat Area - fade in when expanded */}
+        {/* Chat Area - updated bubble colors */}
         <div className={`overflow-y-auto mb-4 transition-all duration-300 ${
           isExpanded ? 'opacity-100 flex-grow h-[calc(100%-180px)]' : 'opacity-0 h-0 overflow-hidden'
         }`}>
@@ -108,7 +146,7 @@ export default function TradingCard() {
               key={index}
               className={`mb-4 p-3 rounded-lg ${
                 message.role === 'user'
-                  ? 'bg-blue-50 ml-auto max-w-[80%]'
+                  ? 'bg-[#91efff] ml-auto max-w-[80%]'
                   : 'bg-gray-50 mr-auto max-w-[80%]'
               }`}
             >
@@ -120,7 +158,7 @@ export default function TradingCard() {
           )}
         </div>
 
-        {/* Input Area - fixed height */}
+        {/* Input Area - updated button colors */}
         <div className={`transition-all duration-300 ${
           isExpanded ? 'mt-auto' : ''
         }`}>
@@ -130,7 +168,11 @@ export default function TradingCard() {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                handleSubmit();
+                if (isExpanded) {
+                  handleSubmit();
+                } else {
+                  handleExpandAndSubmit();
+                }
               }
             }}
             className="w-full h-32 border rounded-xl p-4 mb-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all duration-300"
@@ -145,7 +187,7 @@ export default function TradingCard() {
                 handleExpandAndSubmit();
               }
             }}
-            className="w-full bg-[#d3ffff] text-[#00bcff] font-semibold py-4 rounded-2xl hover:opacity-90 transition-opacity"
+            className="w-full bg-[#91efff] text-black font-semibold py-4 rounded-2xl hover:opacity-90 transition-opacity"
           >
             {isExpanded ? (isLoading ? 'Sending...' : 'Send') : 'Get started'}
           </button>

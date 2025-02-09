@@ -19,7 +19,7 @@ body {
 }
 
 .footer {
-  --footer-background: #d3ffff;
+  --footer-background: #91efff;
   position: fixed;
   min-height: 12rem;
   bottom: -180px;

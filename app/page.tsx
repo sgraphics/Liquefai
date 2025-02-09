@@ -81,7 +81,7 @@ export default function Home() {
             AI liquidity aggregator
           </h1>
           <p className="text-gray-500 text-lg">
-            Making swaps cheaper since 2025
+            Making swaps sweeter since Agentic Eth '25
           </p>
         </div>
 

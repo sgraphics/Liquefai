@@ -20,6 +20,9 @@ import { MemorySaver } from "@langchain/langgraph";
 import { z } from "zod";
 import { UniswapPathFinder } from '../lib/uniswapPathFinder';
 import { Token } from '@uniswap/sdk-core';
+import { UNISWAP_ADDRESSES } from '../lib/constants';
+import { getTokenBySymbol, getCommonBaseTokens } from '../lib/uniswapGraph';
+import { findSplitRoutes, MultiRouteResult } from '../lib/uniswapRouter';
 
 export type ChatResponse = {
   success: boolean;
@@ -51,35 +54,139 @@ const pathFinderAction = customActionProvider<CdpWalletProvider>({
   description: "Find the best swap path for a given input token to multiple possible output tokens",
   schema: z.object({
     amount: z.string().describe("Amount of input tokens (in wei)"),
-    inputToken: z.string().describe("Input token address"),
-    baseTokens: z.array(z.string()).describe("List of base token addresses to try routing through"),
-    outputTokens: z.array(z.string()).describe("List of desired output token addresses"),
+    inputSymbol: z.string().describe("Input token symbol (e.g. 'ETH' or 'WETH', 'USDC')"),
+    outputSymbols: z.array(z.string()).describe("List of desired output token symbols"),
   }),
   invoke: async (walletProvider, args: any) => {
-    const { amount, inputToken, baseTokens, outputTokens } = args;
+    const { amount, inputSymbol, outputSymbols } = args;
     
-    const createToken = (address: string) => new Token(
-      parseInt(walletProvider.getNetwork().chainId),
-      address,
-      18
-    );
+    try {
+      // Get input token data
+      const inputToken = await getTokenBySymbol(inputSymbol);
+      if (!inputToken) {
+        return `Could not find token with symbol ${inputSymbol}. ` + 
+               `Note: For ETH, try using WETH instead, or I'll automatically convert it for you.`;
+      }
 
-    const pathFinder = new UniswapPathFinder(
-      "UNISWAP_QUOTER_ADDRESS", // Replace with actual address for the network
-      walletProvider
-    );
+      // Get output tokens data
+      const outputTokenPromises = outputSymbols.map(symbol => getTokenBySymbol(symbol));
+      const outputTokens = (await Promise.all(outputTokenPromises)).filter(Boolean);
+      
+      if (outputTokens.length === 0) {
+        return `Could not find any of the specified output tokens. ` +
+               `Available tokens can be found on Uniswap Base. ` +
+               `Note: For ETH, use WETH instead.`;
+      }
 
-    const paths = await pathFinder.findBestPaths({
-      amount: BigInt(amount),
-      inputToken: createToken(inputToken),
-      baseTokens: baseTokens.map(createToken),
-      outputTokens: outputTokens.map(createToken),
-      quoterAddress: "UNISWAP_QUOTER_ADDRESS", // Replace with actual address
-      walletProvider
-    });
+      // Get base tokens for routing
+      const baseTokens = await getCommonBaseTokens();
 
-    return paths.slice(0, 5).map(UniswapPathFinder.formatPath).join('\n');
+      const createToken = (tokenData: TokenData) => new Token(
+        parseInt(walletProvider.getNetwork().chainId),
+        tokenData.id as `0x${string}`,
+        parseInt(tokenData.decimals),
+        tokenData.symbol,
+        tokenData.name
+      );
+
+      const pathFinder = new UniswapPathFinder(
+        '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a', // Uniswap V3 Quoter
+        walletProvider
+      );
+
+      const paths = await pathFinder.findBestPaths({
+        amount: BigInt(amount),
+        inputToken: createToken(inputToken!),
+        baseTokens: baseTokens.map(createToken),
+        outputTokens: outputTokens.map(createToken),
+        quoterAddress: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',
+        walletProvider
+      });
+
+      if (paths.length === 0) {
+        return 'No valid paths found for this swap';
+      }
+
+      return paths.slice(0, 5).map(UniswapPathFinder.formatPath).join('\n');
+    } catch (error) {
+      console.error('Error finding swap paths:', error);
+      return 'Failed to find swap paths: ' + (error as Error).message;
+    }
   },
+});
+
+const getRoutesAction = customActionProvider<CdpWalletProvider>({
+  name: "get_split_routes",
+  description: "Find optimal routes for splitting ETH into multiple tokens",
+  schema: z.object({
+    inputAmount: z.string().describe("Amount of ETH to split"),
+    splits: z.array(z.object({
+      token: z.string().describe("Token symbol (e.g., 'USDC', 'DAI')"),
+      percentage: z.number().describe("Percentage of input amount (0-100)")
+    }))
+  }),
+  invoke: async (walletProvider, args: any) => {
+    try {
+      const { inputAmount, splits } = args;
+      
+      // Get token details from graph
+      const tokenPromises = splits.map(async (split: any) => {
+        const token = await getTokenBySymbol(split.token);
+        if (!token) throw new Error(`Token ${split.token} not found`);
+        return {
+          token: {
+            address: token.id,
+            decimals: parseInt(token.decimals),
+            symbol: token.symbol,
+            name: token.name
+          },
+          percentage: split.percentage / 100
+        };
+      });
+
+      const tokenSplits = await Promise.all(tokenPromises);
+      
+      const routes = await find_split_routes(
+        walletProvider,
+        parseInt(walletProvider.getNetwork().chainId),
+        inputAmount,
+        tokenSplits
+      );
+
+      return JSON.stringify(routes, null, 2);
+    } catch (error) {
+      console.error('Error finding routes:', error);
+      return 'Failed to find routes: ' + (error as Error).message;
+    }
+  }
+});
+
+const executeSwapsAction = customActionProvider<CdpWalletProvider>({
+  name: "execute_split_swaps",
+  description: "Execute multiple swaps using found routes",
+  schema: z.object({
+    routesJson: z.string().describe("JSON string of routes from get_split_routes"),
+  }),
+  invoke: async (walletProvider, args: any) => {
+    try {
+      const { routesJson } = args;
+      const routes: MultiRouteResult = JSON.parse(routesJson);
+
+      const ROUTER_ADDRESS = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
+      const routerAbi = ["function multicall(bytes[] calldata data) payable returns (bytes[] memory results)"];
+      
+      const tx = await walletProvider.sendTransaction({
+        to: ROUTER_ADDRESS,
+        value: routes.totalInputValue,
+        data: routes.calldata.join(''), // Simplified - you might need to properly encode multicall
+      });
+
+      return `Transaction submitted: ${tx}`;
+    } catch (error) {
+      console.error('Error executing swaps:', error);
+      return 'Failed to execute swaps: ' + (error as Error).message;
+    }
+  }
 });
 
 async function initializeAgent() {
@@ -120,6 +227,8 @@ async function initializeAgent() {
         */
         liquiditySeeker,
         pathFinderAction,
+        getRoutesAction,
+        executeSwapsAction,
       ],
     });
 

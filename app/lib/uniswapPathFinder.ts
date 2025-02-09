@@ -48,6 +48,7 @@ export class UniswapPathFinder {
     amountIn: bigint
   ): Promise<bigint> {
     try {
+      console.log(`📊 Checking pool ${tokenIn.symbol} -> ${tokenOut.symbol} (fee: ${fee/10000}%)`);
       const params: ReadContractParameters = {
         address: this.quoterAddress as `0x${string}`,
         abi: [{
@@ -70,7 +71,6 @@ export class UniswapPathFinder {
       const quote = await this.walletProvider.readContract(params);
       return BigInt(quote.toString());
     } catch (error) {
-      console.warn(`Failed to get quote for ${tokenIn.symbol} -> ${tokenOut.symbol} with fee ${fee}:`, error);
       return BigInt(0);
     }
   }
@@ -137,8 +137,21 @@ export class UniswapPathFinder {
     inputToken,
     baseTokens,
     outputTokens,
+    quoterAddress,
     walletProvider
-  }: PathFinderParams): Promise<SwapPath[]> {
+  }: {
+    amount: bigint;
+    inputToken: Token;
+    baseTokens: Token[];
+    outputTokens: Token[];
+    quoterAddress: string;
+    walletProvider: CdpWalletProvider;
+  }): Promise<Path[]> {
+    console.log('Input Token:', inputToken);
+    console.log('Base Tokens:', baseTokens);
+    console.log('Output Tokens:', outputTokens);
+
+    console.log(`🛣️ Finding paths from ${inputToken.symbol} to [${outputTokens.map(t => t.symbol).join(', ')}]`);
     const allPaths: SwapPath[] = [];
 
     // Find direct paths
@@ -161,11 +174,14 @@ export class UniswapPathFinder {
     }
 
     // Sort paths by output amount in descending order
-    return allPaths.sort((a, b) => {
+    const sortedPaths = allPaths.sort((a, b) => {
       if (b.outputAmount > a.outputAmount) return 1;
       if (b.outputAmount < a.outputAmount) return -1;
       return 0;
     });
+
+    console.log(`✅ Found ${sortedPaths.length} valid paths`);
+    return sortedPaths;
   }
 
   // Helper method to format the results in a readable way
